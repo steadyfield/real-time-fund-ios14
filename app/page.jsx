@@ -3179,13 +3179,13 @@ export default function HomePage() {
   const fetchCloudConfig = async (userId, checkConflict = false) => {
     if (!userId) return;
     try {
-      const { data, error } = await supabase
-        .from('user_configs')
-        .select('id, data, updated_at')
-        .eq('user_id', userId)
-        .maybeSingle();
-      if (error) throw error;
-      if (!data?.id) {
+      const { data: checkResult, error: checkError } = await supabase.functions.invoke(`check-data?userId=${userId}`, {
+        method: 'GET',
+      });
+
+      if (checkError) throw checkError;
+
+      if (checkResult.status === 'not_found') {
         const { error: insertError } = await supabase
           .from('user_configs')
           .insert({ user_id: userId });
@@ -3193,19 +3193,30 @@ export default function HomePage() {
         setCloudConfigModal({ open: true, userId, type: 'empty' });
         return;
       }
+
+      if (checkResult.status === 'empty') {
+        setCloudConfigModal({ open: true, userId, type: 'empty' });
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('user_configs')
+        .select('id, data, updated_at')
+        .eq('user_id', userId)
+        .single();
+
+      if (error) throw error;
+
       if (data?.data && isPlainObject(data.data) && Object.keys(data.data).length > 0) {
         const localPayload = collectLocalPayload();
         const localComparable = getComparablePayload(localPayload);
         const cloudComparable = getComparablePayload(data.data);
 
         if (localComparable !== cloudComparable) {
-          // 如果数据不一致
           if (checkConflict) {
-            // 只有明确要求检查冲突时才提示（例如刚登录时）
             setCloudConfigModal({ open: true, userId, type: 'conflict', cloudData: data.data });
             return;
           }
-          // 否则直接覆盖本地（例如已登录状态下的刷新）
           await applyCloudConfig(data.data, data.updated_at);
           return;
         }
